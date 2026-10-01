@@ -1,0 +1,12 @@
+# Physics switches
+CONSTANT_COEFFS_POISSON ?= 1
+USE_VOF                 ?= 0
+VOF_DBG                 ?= 0
+HEAT_TRANSFER           ?= 0
+INIT_MONTECARLO         ?= 0
+DO_POSTPROC             ?= 0
+TURB_FORCING            ?= 1
+BOUSSINESQ              ?= 0
+IBM                     ?= 1
+
+MAIN_SRC=main__single_phase_fibers.f90

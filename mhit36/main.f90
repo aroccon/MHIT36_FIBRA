@@ -1,0 +1,604 @@
+program mhit
+! A. Roccon 08/02/2024
+! Homogenous isotropic turbulence solver + phase-field (ACDI)
+! Constant density and viscosity
+! 2nd order finite difference + fastPoisson3D solver for pressure 
+! ABC or TG forcing scheme (see Comparison of forcing schemes to sustain
+! homogeneous isotropic turbulence)
+! Runs on Nvidia GPU (cuFFT), FFTW to be implemented 
+! AB2 for NS + Euler explicit for ACDI
+
+use openacc
+use fastp
+use param
+use velocity
+use phase
+use particles
+
+#define phiflag 0
+#define partflag 0
+#define fibflag 1
+#define openaccflag 1
+
+#if fibflag == 1
+use fibers, only: fib_init, fib_step, fib_output
+#endif
+
+implicit none
+double precision :: val,pos,gamma,umax,normod,uc,vc,wc,maxdiv !only used in main for temp variables
+double precision :: timef,times ! timers for elapsed time
+double precision :: h11,h12,h13,h21,h22,h23,h31,h32,h33,cou,umean,vmean,wmean !for advective terms in NS
+integer :: i,j,k,t,im,jm,km,ip,jp,kp ! loop index and + and - positions
+double precision :: x(nx) ! axis location (same for x,y an z)
+
+!assign the code to one GPU
+call acc_set_device_num(1,acc_device_nvidia)
+
+!read parameters and compute pre-defined constant
+call readinput
+
+!allocate variables
+!NS variables
+allocate(div(nx,nx,nx))
+allocate(u(nx,nx,nx),v(nx,nx,nx),w(nx,nx,nx)) !velocity vector
+allocate(p(nx,nx,nx),rhsp(nx,nx,nx))  ! p and rhsp in physical space
+allocate(pold(nx,nx,nx))  ! p and rhsp in physical space
+allocate(pc(nx/2+1,nx,nx)) ! p and rhsp in complex space
+!allocate(ustar(nx,nx,nx),vstar(nx,nx,nx),wstar(nx,nx,nx)) ! provisional velocity field
+allocate(rhsu(nx,nx,nx),rhsv(nx,nx,nx),rhsw(nx,nx,nx)) ! rhs of u,v and w
+allocate(rhsu_o(nx,nx,nx),rhsv_o(nx,nx,nx),rhsw_o(nx,nx,nx)) ! rhs of u,v and w at time n-1
+allocate(delsq(nx,nx,nx))  ! can be removed in theory
+allocate(kk(nx))
+!PFM variables
+#if phiflag == 1
+allocate(phi(nx,nx,nx),rhsphi(nx,nx,nx),psi(nx,nx,nx))
+allocate(normx(nx,nx,nx),normy(nx,nx,nx),normz(nx,nx,nx))
+allocate(chempot(nx,nx,nx),gradphix(nx,nx,nx),gradphiy(nx,nx,nx),gradphiz(nx,nx,nx))
+allocate(fxst(nx,nx,nx),fyst(nx,nx,nx),fzst(nx,nx,nx)) ! surface tension forces
+#endif
+!particles arrays
+#if partflag == 1
+allocate(xp(np,3),vp(np,3),ufp(np,3),fp(np,3))
+#endif
+
+x(1)=0.0d0
+do i=2,nx
+    x(i)=x(i-1)+dx
+enddo    
+
+!initialize velocity field
+if (restart .eq. 0) then !fresh start Taylor Green or read from file in init folder
+write(*,*) "Initialize velocity field (fresh start)"
+    if (inflow .eq. 0) then
+        write(*,*) "Initialize Taylor-green"
+        do k = 1,nx
+            do j= 1,nx
+                do i = 1,nx
+                    ! evaluate at cell faces, x(nx) is 
+                    u(i,j,k) =   sin(x(i)-dx/2)*cos(x(j))*cos(x(k))
+                    v(i,j,k) =  -cos(x(i))*sin(x(j)-dx/2)*cos(x(k))
+                    w(i,j,k) =  0.d0
+                enddo
+            enddo
+        enddo
+    endif
+    if (inflow .eq. 1) then
+        write(*,*) "Initialize frow data"
+        call readfield(t,1)
+        call readfield(t,2)
+        call readfield(t,3)
+    endif
+    if (inflow .eq. 2) then
+        write(*,*) "Initialize fluid at rest"
+        u = 0.d0
+        v = 0.d0
+        w = 0.d0
+    endif
+    if (inflow .eq. 3) then
+        ! ABC flow with the phase shifts used in FluTAS (inivel='abc', add_noise_abc=T)
+        ! A=f3, B=f1, C=f2, consistent with the ABC forcing below; amplitude u0=1
+        write(*,*) "Initialize ABC flow (FluTAS-like)"
+        do k = 1,nx
+            do j= 1,nx
+                do i = 1,nx
+                    ! u at (x(i)-dx/2,x(j),x(k)), v at (x(i),x(j)-dx/2,x(k)), w at (x(i),x(j),x(k)-dx/2)
+                    u(i,j,k) = f3*sin(k0*x(k)+0.5d0) + f2*cos(k0*x(j)+1.5d0)
+                    v(i,j,k) = f1*sin(k0*x(i)+0.5d0) + f3*cos(k0*x(k)+1.5d0)
+                    w(i,j,k) = f2*sin(k0*x(j)+0.5d0) + f1*cos(k0*x(i)+1.5d0)
+                enddo
+            enddo
+        enddo
+    endif
+endif
+if (restart .eq. 1) then !restart, ignore inflow and read the tstart field 
+    write(*,*) "Initialize velocity field (from output folder), iteration:", tstart
+    call readfield_restart(tstart,1)
+    call readfield_restart(tstart,2)
+    call readfield_restart(tstart,3)
+endif
+
+
+! check on velocity field (also used to compute gamma at first iteration)
+uc=maxval(u)
+vc=maxval(v)
+wc=maxval(w)
+umax=max(wc,max(uc,vc))
+cou=umax*dt*dxi
+write(*,*) "Courant number:",cou
+
+
+! initialize phase-field
+#if phiflag == 1
+if (restart .eq. 0) then
+    write(*,*) 'Initialize phase field (fresh start)'
+    do k = 1,nx
+        do j= 1,nx
+            do i = 1,nx
+                pos=(x(i)-lx/2)**2d0 +  (x(j)-lx/2)**2d0 + (x(k)-lx/2)**2d0
+                phi(i,j,k) = 0.5d0*(1.d0-tanh((sqrt(pos)-radius)/2/eps))
+            enddo
+        enddo
+    enddo
+endif
+if (restart .eq. 1) then
+    write(*,*) "Initialize phase-field (restart, from output folder), iteration:", tstart
+    call readfield_restart(tstart,5)
+endif
+#endif
+
+#if partflag == 1
+write(*,*) 'Initialize particles'
+call random_number(xp)
+xp=xp*lx
+#endif
+
+#if fibflag == 1
+write(*,*) 'Initialize fiber'
+call fib_init(restart,tstart,rho)
+#endif
+
+!initialize the plan for cuFFT
+call init_cufft
+
+!Save initial fields (only if a fresh start)
+if (restart .eq. 0) then
+    write(*,*) "Save initial fields"
+    call writefield(tstart,1)
+    call writefield(tstart,2)
+    call writefield(tstart,3)
+    call writefield(tstart,4)
+    #if phiflag == 1
+    call writefield(tstart,5)
+    #endif
+    #if partflag == 1 
+    call writepart(tstart)
+    #endif
+    #if fibflag == 1
+    call fib_output(tstart)
+    #endif
+endif
+
+!$acc data copy(u,v,w,p,pold) copyin(delsq) create(rhsp,pc,delsq,rhsu,rhsv,rhsw,rhsu_o,rhsv_o,rhsw_o,div)
+#if phiflag == 1
+!$acc copy(phi,psi)   create(rhsphi, normx, normy, normz, chempot, gradphix, gradphiy, gradphiz, fxst, fyst, fzst)
+#endif
+tstart=tstart+1
+! First step use Euler and then move to AB2 
+alpha=1.0d0
+beta=0.0d0
+! Start temporal loop
+do t=tstart,tfin
+
+    call cpu_time(times)
+    write(*,*) "Time step",t,"of",tfin
+
+
+    ! Advance marker function
+    ! Compute convective term (A)
+    #if phiflag == 1
+    !$acc kernels 
+    do k=1,nx
+        do j=1,nx
+            do i=1,nx
+                ip=i+1
+                jp=j+1
+                kp=k+1
+                im=i-1
+                jm=j-1
+                km=k-1
+                if (ip .gt. nx) ip=1
+                if (jp .gt. nx) jp=1
+                if (kp .gt. nx) kp=1   
+                if (im .lt. 1) im=nx
+                if (jm .lt. 1) jm=nx
+                if (km .lt. 1) km=nx 
+                rhsphi(i,j,k) = - (u(ip,j,k)*0.5d0*(phi(ip,j,k)+phi(i,j,k)) - u(i,j,k)*0.5d0*(phi(i,j,k)+phi(im,j,k)))*dxi  &
+                                - (v(i,jp,k)*0.5d0*(phi(i,jp,k)+phi(i,j,k)) - v(i,j,k)*0.5d0*(phi(i,j,k)+phi(i,jm,k)))*dxi  &
+                                - (w(i,j,kp)*0.5d0*(phi(i,j,kp)+phi(i,j,k)) - w(i,j,k)*0.5d0*(phi(i,j,k)+phi(i,j,km)))*dxi
+            enddo
+        enddo
+    enddo
+    !$acc end kernels
+
+    gamma=1.0d0*umax
+    !write(*,*) "gamma", gamma
+    !Compute diffusive term 
+    !$acc kernels
+    do k=1,nx
+        do j=1,nx
+            do i=1,nx
+                ip=i+1
+                jp=j+1
+                kp=k+1
+                im=i-1
+                jm=j-1
+                km=k-1
+                if (ip .gt. nx) ip=1
+                if (jp .gt. nx) jp=1
+                if (kp .gt. nx) kp=1   
+                if (im .lt. 1) im=nx
+                if (jm .lt. 1) jm=nx
+                if (km .lt. 1) km=nx 
+                rhsphi(i,j,k)=rhsphi(i,j,k)+gamma*(eps*(phi(ip,j,k)-2.d0*phi(i,j,k)+phi(im,j,k))*ddxi + &
+                                                   eps*(phi(i,jp,k)-2.d0*phi(i,j,k)+phi(i,jm,k))*ddxi + &         
+                                                   eps*(phi(i,j,kp)-2.d0*phi(i,j,k)+phi(i,j,km))*ddxi)
+            enddo
+        enddo
+    enddo
+    !$acc end kernels
+
+    ! compute distance function psi (used to compute normals)
+    !$acc kernels
+    do k=1,nx
+        do j=1,nx
+            do i=1,nx
+		        val=min(phi(i,j,k),1.d0) ! avoid tiny overshots due to Euler integration
+                psi(i,j,k) = eps*dlog((val+enum)/(1.d0-val+enum))
+            enddo
+        enddo
+    enddo
+    !$acc end kernels
+
+    !Compute Sharpening term
+    ! Step 1: Compute gradients
+    !$acc kernels
+    do k=1,nx
+        do j=1,nx
+            do i=1,nx
+                ip=i+1
+                jp=j+1
+                kp=k+1
+                im=i-1
+                jm=j-1
+                km=k-1
+                if (ip .gt. nx) ip=1
+                if (jp .gt. nx) jp=1
+                if (kp .gt. nx) kp=1   
+                if (im .lt. 1) im=nx
+                if (jm .lt. 1) jm=nx
+                if (km .lt. 1) km=nx 
+                normx(i,j,k) = (psi(ip,j,k) - psi(im,j,k))
+                normy(i,j,k) = (psi(i,jp,k) - psi(i,jm,k))
+                normz(i,j,k) = (psi(i,j,kp) - psi(i,j,km)) 
+            enddo
+        enddo
+    enddo 
+
+    ! Step 2: Compute normals (1.e-16 is a numerical tolerance)
+    do k=1,nx
+        do j=1,nx
+            do i=1,nx
+                normod = 1.d0/(sqrt(normx(i,j,k)**2d0 + normy(i,j,k)**2d0 + normz(i,j,k)**2d0) + enum)
+                normx(i,j,k) = normx(i,j,k)*normod
+                normy(i,j,k) = normy(i,j,k)*normod
+                normz(i,j,k) = normz(i,j,k)*normod
+            enddo
+        enddo
+    enddo
+    !$acc end kernels
+
+    ! Compute sharpening term
+    !$acc kernels
+    do k=1,nx
+        do j=1,nx
+            do i=1,nx
+                ip=i+1
+                jp=j+1
+                kp=k+1
+                im=i-1
+                jm=j-1
+                km=k-1
+                if (ip .gt. nx) ip=1
+                if (jp .gt. nx) jp=1
+                if (kp .gt. nx) kp=1   
+                if (im .lt. 1) im=nx
+                if (jm .lt. 1) jm=nx
+                if (km .lt. 1) km=nx 
+                ! ACDI
+                rhsphi(i,j,k)=rhsphi(i,j,k) - gamma*((0.25d0*(1.d0-(tanh(0.5d0*psi(ip,j,k)*epsi))**2)*normx(ip,j,k)- 0.25d0*(1.d0-(tanh(0.5d0*psi(im,j,k)*epsi))**2)*normx(im,j,k))*0.5*dxi +&
+                                                     (0.25d0*(1.d0-(tanh(0.5d0*psi(i,jp,k)*epsi))**2)*normy(i,jp,k)- 0.25d0*(1.d0-(tanh(0.5d0*psi(i,jm,k)*epsi))**2)*normy(i,jm,k))*0.5*dxi +&
+                                                     (0.25d0*(1.d0-(tanh(0.5d0*psi(i,j,kp)*epsi))**2)*normz(i,j,kp)- 0.25d0*(1.d0-(tanh(0.5d0*psi(i,j,km)*epsi))**2)*normz(i,j,km))*0.5*dxi)
+            enddo
+        enddo
+    enddo
+    !$acc end kernels
+
+
+    ! Compute new phase field n+1
+    !$acc kernels
+    do k=1,nx
+        do j=1,nx
+            do i=1,nx
+                phi(i,j,k) = phi(i,j,k) + dt*rhsphi(i,j,k)
+            enddo
+        enddo
+    enddo
+    !$acc end kernels
+    !write(*,*) "maxvalphi", maxval(phi), "minvalphi", minval(phi)
+    if (maxval(phi) .lt. 0.5d0) write(*,*) "Phi is gone"
+    #endif
+
+
+    ! Projection step, convective terms
+    !Convective + diffusive + pressure gradients terms NS
+    !$acc parallel loop collapse(3) present(u,v,w,rhsu,rhsv,rhsw)
+    do k=1,nx
+        do j=1,nx
+            do i=1,nx
+                ip=i+1
+                jp=j+1
+                kp=k+1
+                im=i-1
+                jm=j-1
+                km=k-1
+                if (ip .gt. nx) ip=1
+                if (jp .gt. nx) jp=1
+                if (kp .gt. nx) kp=1   
+                if (im .lt. 1) im=nx
+                if (jm .lt. 1) jm=nx
+                if (km .lt. 1) km=nx 
+                ! compute the products (conservative form)
+                h11 = 0.25d0*((u(ip,j,k)+u(i,j,k))*(u(ip,j,k)+u(i,j,k))     - (u(i,j,k)+u(im,j,k))*(u(i,j,k)+u(im,j,k)))*dxi
+                h12 = 0.25d0*((u(i,jp,k)+u(i,j,k))*(v(i,jp,k)+v(im,jp,k))   - (u(i,j,k)+u(i,jm,k))*(v(i,j,k)+v(im,j,k)))*dxi
+                h13 = 0.25d0*((u(i,j,kp)+u(i,j,k))*(w(i,j,kp)+w(im,j,kp))   - (u(i,j,k)+u(i,j,km))*(w(i,j,k)+w(im,j,k)))*dxi
+                h21 = 0.25d0*((u(ip,j,k)+u(ip,jm,k))*(v(ip,j,k)+v(i,j,k))   - (u(i,j,k)+u(i,jm,k))*(v(i,j,k)+v(im,j,k)))*dxi
+                h22 = 0.25d0*((v(i,jp,k)+v(i,j,k))*(v(i,jp,k)+v(i,j,k))     - (v(i,j,k)+v(i,jm,k))*(v(i,j,k)+v(i,jm,k)))*dxi
+                h23 = 0.25d0*((w(i,j,kp)+w(i,jm,kp))*(v(i,j,kp)+v(i,j,k))   - (w(i,j,k)+w(i,jm,k))*(v(i,j,k)+v(i,j,km)))*dxi
+                h31 = 0.25d0*((w(ip,j,k)+w(i,j,k))*(u(ip,j,k)+u(ip,j,km))   - (w(i,j,k)+w(im,j,k))*(u(i,j,k)+u(i,j,km)))*dxi
+                h32 = 0.25d0*((v(i,jp,k)+v(i,jp,km))*(w(i,jp,k)+w(i,j,k))   - (v(i,j,k)+v(i,j,km))*(w(i,j,k)+w(i,jm,k)))*dxi
+                h33 = 0.25d0*((w(i,j,kp)+w(i,j,k))*(w(i,j,kp)+w(i,j,k))     - (w(i,j,k)+w(i,j,km))*(w(i,j,k)+w(i,j,km)))*dxi
+                ! add to the rhs
+                rhsu(i,j,k)=-(h11+h12+h13)
+                rhsv(i,j,k)=-(h21+h22+h23)
+                rhsw(i,j,k)=-(h31+h32+h33)
+                ! diffusive terms
+                h11 = mu*(u(ip,j,k)-2.d0*u(i,j,k)+u(im,j,k))*ddxi
+                h12 = mu*(u(i,jp,k)-2.d0*u(i,j,k)+u(i,jm,k))*ddxi
+                h13 = mu*(u(i,j,kp)-2.d0*u(i,j,k)+u(i,j,km))*ddxi
+                h21 = mu*(v(ip,j,k)-2.d0*v(i,j,k)+v(im,j,k))*ddxi
+                h22 = mu*(v(i,jp,k)-2.d0*v(i,j,k)+v(i,jm,k))*ddxi
+                h23 = mu*(v(i,j,kp)-2.d0*v(i,j,k)+v(i,j,km))*ddxi
+                h31 = mu*(w(ip,j,k)-2.d0*w(i,j,k)+w(im,j,k))*ddxi
+                h32 = mu*(w(i,jp,k)-2.d0*w(i,j,k)+w(i,jm,k))*ddxi
+                h33 = mu*(w(i,j,kp)-2.d0*w(i,j,k)+w(i,j,km))*ddxi
+                rhsu(i,j,k)=rhsu(i,j,k)+(h11+h12+h13)*rhoi
+                rhsv(i,j,k)=rhsv(i,j,k)+(h21+h22+h23)*rhoi
+                rhsw(i,j,k)=rhsw(i,j,k)+(h31+h32+h33)*rhoi
+                ! pressure gradient terms (from pold)
+                !rhsu(i,j,k)=rhsu(i,j,k) - (pold(i,j,k)-pold(im,j,k))*dxi*rhoi
+                !rhsv(i,j,k)=rhsv(i,j,k) - (pold(i,j,k)-pold(i,jm,k))*dxi*rhoi
+                !rhsw(i,j,k)=rhsw(i,j,k) - (pold(i,j,k)-pold(i,j,km))*dxi*rhoi
+                ! ABC forcing
+                rhsu(i,j,k)= rhsu(i,j,k) + f3*sin(k0*x(k))+f2*cos(k0*x(j))
+                rhsv(i,j,k)= rhsv(i,j,k) + f1*sin(k0*x(i))+f3*cos(k0*x(k))
+                rhsw(i,j,k)= rhsw(i,j,k) + f2*sin(k0*x(j))+f1*cos(k0*x(i))
+                ! TG Forcing
+            enddo
+        enddo
+    enddo
+
+
+    ! Surface tension forces
+    #if phiflag == 1
+    !$acc kernels
+    do k=1,nx
+        do j=1,nx
+            do i=1,nx
+                ip=i+1
+                jp=j+1
+                kp=k+1
+                im=i-1
+                jm=j-1
+                km=k-1
+                if (ip .gt. nx) ip=1
+                if (jp .gt. nx) jp=1
+                if (kp .gt. nx) kp=1
+                if (im .lt. 1) im=nx
+                if (jm .lt. 1) jm=nx
+                if (km .lt. 1) km=nx 
+                chempot(i,j,k)=phi(i,j,k)*(1.d0-phi(i,j,k))*(1.d0-2.d0*phi(i,j,k))*epsi-eps*(phi(ip,j,k)+phi(im,j,k)+phi(i,jp,k)+phi(i,jm,k)+phi(i,j,kp)+phi(i,j,km)- 6.d0*phi(i,j,k))*ddxi
+                gradphix(i,j,k)=0.5d0*(phi(ip,j,k)-phi(im,j,k))*dxi
+                gradphiy(i,j,k)=0.5d0*(phi(i,jp,k)-phi(i,jm,k))*dxi
+                gradphiz(i,j,k)=0.5d0*(phi(i,j,kp)-phi(i,j,km))*dxi
+                fxst(i,j,k)=6.d0*sigma*chempot(i,j,k)*gradphix(i,j,k)
+                fyst(i,j,k)=6.d0*sigma*chempot(i,j,k)*gradphiy(i,j,k)
+                fzst(i,j,k)=6.d0*sigma*chempot(i,j,k)*gradphiz(i,j,k)
+                rhsu(i,j,k)=rhsu(i,j,k) + 0.5d0*(fxst(im,j,k)+fxst(i,j,k))*rhoi
+                rhsv(i,j,k)=rhsv(i,j,k) + 0.5d0*(fyst(i,jm,k)+fyst(i,j,k))*rhoi
+                rhsw(i,j,k)=rhsw(i,j,k) + 0.5d0*(fzst(i,j,km)+fzst(i,j,k))*rhoi
+            enddo
+        enddo
+    enddo
+    !$acc end kernels
+    #endif
+
+    ! find u, v and w star (AB2), overwrite u,v and w
+    !$acc parallel loop collapse(3)
+    do k=1,nx
+        do j=1,nx
+            do i=1,nx
+                u(i,j,k) = u(i,j,k) + dt*(alpha*rhsu(i,j,k)-beta*rhsu_o(i,j,k))
+                v(i,j,k) = v(i,j,k) + dt*(alpha*rhsv(i,j,k)-beta*rhsv_o(i,j,k))
+                w(i,j,k) = w(i,j,k) + dt*(alpha*rhsw(i,j,k)-beta*rhsw_o(i,j,k))
+                rhsu_o(i,j,k)=rhsu(i,j,k)
+                rhsv_o(i,j,k)=rhsv(i,j,k)
+                rhsw_o(i,j,k)=rhsw(i,j,k)
+            enddo
+        enddo
+    enddo
+    ! switch from Euler (first step) to AB2 on the host, outside the device loop
+    alpha=1.5d0
+    beta= 0.5d0
+
+    ! Fiber: IBM force added to u* (GPU) and fiber advanced (CPU)
+    #if fibflag == 1
+    call fib_step(t,dt)
+    #endif
+
+    ! Compute rhs of Poisson equation div*ustar: divergence at the cell center 
+    !$acc kernels
+    do k=1,nx
+        do j=1,nx
+            do i=1,nx
+                ip=i+1
+                jp=j+1
+                kp=k+1
+                if (ip > nx) ip=1
+                if (jp > nx) jp=1
+                if (kp > nx) kp=1
+                rhsp(i,j,k) =               (rho*dxi/dt)*(u(ip,j,k)-u(i,j,k))
+                rhsp(i,j,k) = rhsp(i,j,k) + (rho*dxi/dt)*(v(i,jp,k)-v(i,j,k))
+                rhsp(i,j,k) = rhsp(i,j,k) + (rho*dxi/dt)*(w(i,j,kp)-w(i,j,k))
+            enddo
+        enddo
+    enddo
+    !$acc end kernels
+
+    ! call Poisson solver (3DFastPoissons + periodic BCs)
+    call poissonfast
+
+    ! Correct velocity 
+   !$acc kernels 
+    do k=1,nx
+        do j=1,nx
+            do i=1,nx
+                im=i-1
+                jm=j-1
+                km=k-1
+                if (im < 1) im=nx
+                if (jm < 1) jm=nx
+                if (km < 1) km=nx   
+                u(i,j,k)=u(i,j,k) - dt/rho*(p(i,j,k)-p(im,j,k))*dxi
+                v(i,j,k)=v(i,j,k) - dt/rho*(p(i,j,k)-p(i,jm,k))*dxi
+                w(i,j,k)=w(i,j,k) - dt/rho*(p(i,j,k)-p(i,j,km))*dxi
+                !pold(i,j,k)=pold(i,j,k) + p(i,j,k)
+            enddo
+        enddo
+    enddo
+   !$acc end kernels 
+ 
+   ! Check divergence (can be skipped in production)
+   maxdiv=0.d0
+   !$acc parallel loop collapse(3) reduction(max:maxdiv) present(u,v,w,div)
+   do i=1,nx
+       do j=1,nx
+            do k=1,nx
+                ip=i+1
+                jp=j+1
+                kp=k+1
+                if (ip .gt. nx) ip=1
+                if (jp .gt. nx) jp=1
+                if (kp .gt. nx) kp=1   
+                div(i,j,k) = dxi*(u(ip,j,k)-u(i,j,k) + v(i,jp,k)-v(i,j,k) + w(i,j,kp)-w(i,j,k))
+                maxdiv=max(maxdiv,abs(div(i,j,k)))
+            enddo
+        enddo
+    enddo
+
+    write(*,*) "maxdiv", maxdiv
+
+    ! remove mean velocity
+    !$acc kernels
+    umean=sum(u)/nx/nx/nx
+    vmean=sum(v)/nx/nx/nx
+    wmean=sum(w)/nx/nx/nx
+    u=u-umean
+    v=v-vmean
+    w=w-wmean
+    !$acc end kernels 
+
+    ! Advance particles (get velocity and advance according to particle type)
+    #if partflag==1
+    call get_velocity
+    call move_part
+    #endif
+
+    !Check before next time step
+    !check courant number
+    !$acc kernels
+    cou=0.d0
+    uc=maxval(u)
+    vc=maxval(v)
+    wc=maxval(w)
+    umax=max(wc,max(uc,vc))
+    !$acc end kernels
+
+
+    cou=umax*dt*dxi
+    write(*,*) "Courant number:",cou
+    if (cou .gt. 7) stop "Unstable -> stop, stop, stop"
+
+    call cpu_time(timef)
+    print '(" Time elapsed = ",f6.1," ms")',1000*(timef-times)
+
+    !output fields
+    if (mod(t,dump) .eq. 0) then
+        write(*,*) "Saving output files"
+            ! write velocity and pressure fiels (1-4)
+	        call writefield(t,1)
+	        call writefield(t,2)
+	        call writefield(t,3)
+            call writefield(t,4)
+	    #if phiflag == 1
+            ! write phase-field (5)
+	        call writefield(t,5)
+        #endif
+        #if partflag == 1 
+            ! write particles
+            call writepart(t)
+        #endif
+        #if fibflag == 1
+            ! write fiber (control points + restart state)
+            call fib_output(t)
+        #endif
+    endif
+
+enddo
+!$acc end data
+
+
+!deallocate
+!NS variables
+deallocate(u,v,w)
+deallocate(p,pc,rhsp)
+deallocate(ustar,vstar,wstar)
+deallocate(rhsu,rhsv,rhsw)
+deallocate(rhsu_o,rhsv_o,rhsw_o)
+!PFM variables
+#if phiflag==1
+deallocate(phi,rhsphi,normx,normy,normz)
+#endif
+!Partciles variables
+#if partflag==1
+deallocate(xp,vp,ufp,fp)
+#endif
+
+end program 
+
+
+
+
+
+
+
+

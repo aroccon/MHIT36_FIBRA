@@ -1,0 +1,34 @@
+# Compiler definitions
+#
+# GNU cpu version
+#
+CPP_FLAGS := -cpp 
+CC        := nvc++
+FC        := mpif90 
+OPT       := -Minfo=accel -fast
+DBG       := 
+PRE       := -r8
+
+# Take all the compiler flags together
+FFLAGS  := $(OPT) $(PRE)
+#FFLAGS  := $(DBG) $(PRE)
+DFLAGS  = -D_TIMING 
+DFLAGS  += -D_EPA2A
+DFLAGS  += -D_DECOMP_X
+#DFLAGS  += -D_OVERWRITE # FFLAGS_2DECOMP
+#DFLAGS  += -D_EVEN # FFLAGS_2DECOMP
+LDFLAGS :=
+
+# Architecture switches
+USE_NVTX ?= 0
+
+# Required for FFTW
+FFTW_HOME := /home/sw-hackathons/opt/spack/linux-ubuntu18.04-broadwell/nvhpc-21.9/fftw-3.3.9-crw2ro6zlfzbme4mvqrpq7xo7lsdrinb
+LDFLAGS   += -L${FFTW_HOME}/lib -lfftw3
+
+# Required for INIT_MONTECARLO
+#GSL_LIB   += -L~/lib -lgsl -lgslcblas -lm -lstdc++
+#GSL_INC   += -I~/include 
+
+# Required for NVTX
+ NVTX_LIB   += -lnvToolsExt

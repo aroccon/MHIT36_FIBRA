@@ -1,0 +1,6 @@
+T    ! do_avg
+3    ! avg_dir
+50   ! time_deltai
+F    ! do_favre
+F    ! do_wall
+10   ! wall_deltai
