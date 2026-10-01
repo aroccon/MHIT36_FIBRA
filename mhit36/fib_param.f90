@@ -30,9 +30,9 @@ module fib_param
     ! .false.: material frame = global frame at t=0, as in FluTAS (the rod axis is then
     !          the material z axis, so axial/bending/torsion get the FluTAS stiffnesses)
     ! .true. : material axis 1 aligned with the fiber tangent at t=0
-    logical, parameter          :: align_frame = .false.
+    logical, parameter          :: align_frame = .true.        ! mode-3 test (FluTAS: .false.)
     ! IGA discretisation
-    integer, parameter          :: nel = 12, deg_ele = 0  ! elements, degree elevation
+    integer, parameter          :: nel = 24, deg_ele = 0  ! elements, degree elevation (mode-3 test; was 12)
     integer, parameter          :: p1_fordr = 2 + deg_ele ! control points per element
     integer, parameter          :: nno = nel + 1 + deg_ele, ndof = 6*nno
     integer, parameter          :: nir = ndof             ! free-free fiber: all dofs active
@@ -60,12 +60,15 @@ module fib_param
     real(fk), parameter         :: Deltaf = merge(1.0D-09, 1.0D-07, precision(1._fk) > 20)
     ! output frequency of the fiber log (time steps)
     integer, parameter          :: fib_log = 1                 ! natural-frequency test (production: 100)
+    ! output frequency of the fiber shape files output/fib_XXXXXXXX.dat (time steps, 0 = only at dump)
+    integer, parameter          :: fib_out = 10                ! mode-3 test: ~20 frames per period
     ! .false.: fluid-fiber coupling off (no interpolation/spreading, zero hydrodynamic load):
     !          the fiber evolves in vacuum, to validate the structural solver alone.
     !          For a test without external load also set g_vec = 0 (or inertia = 0).
     logical, parameter          :: fib_coupling = .false.      ! natural-frequency test (production: .true.)
-    ! initial transverse velocity with the shape of the first free-free bending mode
+    ! initial transverse velocity with the shape of a free-free bending mode (pert_mode = 1..4)
     ! (amplitude at the fiber ends, along pert_dir projected normal to the fiber); 0 = fiber at rest
     double precision, parameter :: pert_amp = 1.d-3           ! natural-frequency test (production: 0)
     double precision, parameter :: pert_dir(3) = (/ 0.d0, 1.d0, 0.d0 /)
+    integer, parameter          :: pert_mode = 3               ! mode-3 test
 end module fib_param

@@ -240,7 +240,7 @@ if (restart .eq. 0) then
     omg1  = 0.d0; omg2  = 0.d0; omg3  = 0.d0
     ua    = 0.d0; va    = 0.d0; wa    = 0.d0
     omgd1 = 0.d0; omgd2 = 0.d0; omgd3 = 0.d0
-    if (pert_amp .ne. 0.d0) call init_mode1(dir, q0)
+    if (pert_amp .ne. 0.d0) call init_mode(dir, q0)
 else
     call fib_read_restart(tstart)
 endif
@@ -270,18 +270,22 @@ end subroutine fib_init
 
 
 !===========================================================================
-! Initial velocity with the shape of the first free-free bending mode of an
-! Euler-Bernoulli beam: v(s) = pert_amp*phi(s)/2 along n (phi(0) = phi(L) = 2),
+! Initial velocity with the shape of free-free bending mode pert_mode of an
+! Euler-Bernoulli beam: v(s) = pert_amp*phi(s)/2 along n (|phi(0)| = |phi(L)| = 2),
 ! with the consistent rotation rate t x dv/ds. Control points are placed at
 ! their Greville abscissae.
-subroutine init_mode1(dir, q0)
+subroutine init_mode(dir, q0)
 implicit none
 double precision, intent(in) :: dir(3)
 real(fk), intent(in)         :: q0(4)
-double precision, parameter  :: bL = 4.730040744862704d0
+double precision, parameter  :: bLn(4) = (/ 4.730040744862704d0, 7.853204624095838d0, &
+                                            10.99560783800167d0, 14.13716549125746d0 /)
+double precision :: bL
 double precision :: n(3), s, b, sig, phi, dphi, vel(3), wg(3)
 real(fk)         :: wgl(3), wloc(3)
 integer :: i, p
+if (pert_mode .lt. 1 .or. pert_mode .gt. 4) stop "Fiber: pert_mode must be 1, 2, 3 or 4"
+bL = bLn(pert_mode)
 n = pert_dir - dot_product(pert_dir, dir)*dir
 if (sqrt(sum(n**2)) .lt. 1.d-12) stop "Fiber: pert_dir must not be parallel to the fiber"
 n = n/sqrt(sum(n**2))
@@ -302,8 +306,8 @@ do i = 1, nno
     dxdtl(i) = vel(1); dydtl(i) = vel(2); dzdtl(i) = vel(3)
     omg1(i)  = wloc(1); omg2(i) = wloc(2); omg3(i) = wloc(3)
 enddo
-write(*,*) "Fiber: initial velocity = first bending mode, end amplitude", pert_amp
-end subroutine init_mode1
+write(*,*) "Fiber: initial velocity = bending mode", pert_mode, ", end amplitude", pert_amp
+end subroutine init_mode
 
 
 
@@ -703,6 +707,9 @@ do while (eN .gt. TOL)
     endif
 enddo
 nr_last = nr_step
+if (fib_out .gt. 0) then
+    if (mod(istep,fib_out) .eq. 0) call fib_write_shape(istep)
+endif
 
 ! store the new state
 xfpo = xll;  yfpo = yll;  zfpo = zll
@@ -732,15 +739,15 @@ elseif (zcen .lt. 0.d0) then
     zll = zll + lx; zfpo = zfpo + lx
 endif
 
-! log: step, Newton iterations, length, centre and velocity of the centre
+! log: step, Newton iterations, length, centre position and velocity, position of the last end
 if (mod(istep,fib_log) .eq. 0) then
     length = 0.d0
     do ii = 1, nno-1
         length = length + sqrt((xll(ii+1)-xll(ii))**2 + (yll(ii+1)-yll(ii))**2 + (zll(ii+1)-zll(ii))**2)
     enddo
     open(unit=56,file='./output/fiber_log.dat',position='append')
-    write(56,'(I9,I4,7ES16.7)') istep, nr_last, length, xll((nno+1)/2), yll((nno+1)/2), zll((nno+1)/2), &
-                                dxdtl((nno+1)/2), dydtl((nno+1)/2), dzdtl((nno+1)/2)
+    write(56,'(I9,I4,10ES16.7)') istep, nr_last, length, xll((nno+1)/2), yll((nno+1)/2), zll((nno+1)/2), &
+                                 dxdtl((nno+1)/2), dydtl((nno+1)/2), dzdtl((nno+1)/2), xll(nno), yll(nno), zll(nno)
     close(56)
 endif
 end subroutine rod_update
@@ -803,6 +810,19 @@ subroutine fib_output(t)
 implicit none
 integer, intent(in) :: t
 character(len=40) :: namefile
+call fib_write_shape(t)
+write(namefile,'(a,i8.8,a)') './output/fibstate_',t,'.dat'
+open(unit=57,file=namefile,form='unformatted',access='stream',status='replace')
+write(57) nno, xll, yll, zll, qn1, qn2, qn3, qn4, dxdtl, dydtl, dzdtl, omg1, omg2, omg3, &
+          ua, va, wa, omgd1, omgd2, omgd3
+close(57)
+end subroutine fib_output
+
+! control points (text), also written every fib_out steps for movies
+subroutine fib_write_shape(t)
+implicit none
+integer, intent(in) :: t
+character(len=40) :: namefile
 integer :: i
 write(namefile,'(a,i8.8,a)') './output/fib_',t,'.dat'
 open(unit=57,file=namefile,form='formatted',status='replace')
@@ -812,12 +832,7 @@ do i = 1, nno
                             dxdtl(i), dydtl(i), dzdtl(i), fxll(i), fyll(i), fzll(i)
 enddo
 close(57)
-write(namefile,'(a,i8.8,a)') './output/fibstate_',t,'.dat'
-open(unit=57,file=namefile,form='unformatted',access='stream',status='replace')
-write(57) nno, xll, yll, zll, qn1, qn2, qn3, qn4, dxdtl, dydtl, dzdtl, omg1, omg2, omg3, &
-          ua, va, wa, omgd1, omgd2, omgd3
-close(57)
-end subroutine fib_output
+end subroutine fib_write_shape
 
 subroutine fib_read_restart(t)
 implicit none

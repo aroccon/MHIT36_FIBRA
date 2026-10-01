@@ -1,9 +1,9 @@
 NVARCH=Linux_x86_64; export NVARCH
 NVCOMPILERS=/opt/nvidia/hpc_sdk; export NVCOMPILERS
-MANPATH=$MANPATH:$NVCOMPILERS/$NVARCH/24.3/compilers/man; export MANPATH
-PATH=$NVCOMPILERS/$NVARCH/24.3/compilers/bin:$PATH; export PATH
-export PATH=$NVCOMPILERS/$NVARCH/24.3/comm_libs/mpi/bin:$PATH
-export MANPATH=$MANPATH:$NVCOMPILERS/$NVARCH/24.3/comm_libs/mpi/man
+MANPATH=$MANPATH:$NVCOMPILERS/$NVARCH/26.5/compilers/man; export MANPATH
+PATH=$NVCOMPILERS/$NVARCH/26.5/compilers/bin:$PATH; export PATH
+export PATH=$NVCOMPILERS/$NVARCH/26.5/comm_libs/mpi/bin:$PATH
+export MANPATH=$MANPATH:$NVCOMPILERS/$NVARCH/26.5/comm_libs/mpi/man
 cp Makefile_local Makefile
 rm *.mod
 rm mhit36
