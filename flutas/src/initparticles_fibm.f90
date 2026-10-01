@@ -98,8 +98,12 @@ endif
 J_xx = I_zz + I_yy
 
 ! location of points in parametric system
-nxi_tvec = linspace(0.0_dp, L_fibr*1.0_dp, 2+nl)
-nxi_vec  = nxi_tvec(2:1+nl)
+! Lagrangian points at the centre of nl equal segments (parametric coordinate in [0,1]),
+! so that point l always lies in element (l-1)/nxie+1, as assumed in ap_ugp/ap_fgp.
+! (Before: nxi_vec(l) = l*L_fibr/(nl+1) put 5 points in the wrong element and point nl at the origin.)
+do i = 1, nl
+  nxi_vec(i) = (real(i) - 0.5)/real(nl)
+enddo
 
 
 

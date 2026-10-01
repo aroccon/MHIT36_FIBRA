@@ -39,9 +39,9 @@ INTEGER                :: p_ordr=1, noCP=2
 INTEGER, PARAMETER     :: nno=nel+ (1+deg_ele) + add_ele*nel, ndof=6*nno, &
                           p1_fordr=1+1+deg_ele+add_ele, rows_w=6*p1_fordr
 ! parametric points
-integer, parameter     :: nxie=10, nl=nel*nxie+1, nderiv=2
+integer, parameter     :: nxie=10, nl=nel*nxie, nderiv=2   ! nl = points actually used (was nel*nxie+1)
 real                   :: nxi_tvec(nl), nxi_vec(nl)
-real, parameter        :: ds = L_fibr/(1.*(nl-1))
+real, parameter        :: ds = L_fibr/(1.*nl)               ! arc length of each Lagrangian point
 ! End point forces/moments and Distributed force related
 INTEGER, PARAMETER    :: bc0_dof(6) = (/ 1, 2, 3, 4, 5, 6 /), &
 !INTEGER, PARAMETER   :: bc0_dof(3) = (/ 1, 2, 3 /), &

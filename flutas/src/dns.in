@@ -5,10 +5,10 @@
 T                        ! constant_dt
 ab2 cen                  ! time_scheme, space_scheme_mom
 1.E+00 0.006             ! rho_sp, mu_sp
-abc                      ! inivel
+zer                      ! inivel
 F abc                    ! is_wallturb, wallturb_type
 cfr                      ! bulk_ftype
-250 99900. 0.2           ! nstep,time_max,tw_max
+20000 99900. 0.2           ! nstep,time_max,tw_max
 F T F                    ! stop_type(1:3)
 F                        ! restart
 50 1000 2000 2000 2000 2000 ! icheck, iout0d, iout1d, iout2d, iout3d, isave

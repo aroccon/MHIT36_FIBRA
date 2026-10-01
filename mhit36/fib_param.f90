@@ -23,16 +23,16 @@ module fib_param
     real, parameter             :: rhof = 10.             ! fiber density (only used when Eflag=.false.)
     character(1), parameter     :: c_type = "c"           ! cross section: c=circular, s=square
     ! initial position of the fiber centre and direction of its axis
-    double precision, parameter :: xc0 = 3.14159265358979d0
-    double precision, parameter :: yc0 = 3.14159265358979d0
-    double precision, parameter :: zc0 = 3.14159265358979d0
-    double precision, parameter :: dir0(3) = (/ 0.d0, 0.d0, 1.d0 /)
+    double precision, parameter :: xc0 = 3.14d0          ! FluTAS: lx/2 with lx=6.28 (param_fibm)
+    double precision, parameter :: yc0 = 5.966d0         ! FluTAS: 0.95*ly
+    double precision, parameter :: zc0 = 3.14d0          ! FluTAS: lz/2
+    double precision, parameter :: dir0(3) = (/ 0.d0, 0.d0, 1.d0 /)   ! FluTAS: along z
     ! .false.: material frame = global frame at t=0, as in FluTAS (the rod axis is then
     !          the material z axis, so axial/bending/torsion get the FluTAS stiffnesses)
     ! .true. : material axis 1 aligned with the fiber tangent at t=0
-    logical, parameter          :: align_frame = .true.        ! mode-3 test (FluTAS: .false.)
+    logical, parameter          :: align_frame = .false.       ! sedimentation vs FluTAS (production: .true.)
     ! IGA discretisation
-    integer, parameter          :: nel = 24, deg_ele = 0  ! elements, degree elevation (mode-3 test; was 12)
+    integer, parameter          :: nel = 12, deg_ele = 0  ! elements, degree elevation
     integer, parameter          :: p1_fordr = 2 + deg_ele ! control points per element
     integer, parameter          :: nno = nel + 1 + deg_ele, ndof = 6*nno
     integer, parameter          :: nir = ndof             ! free-free fiber: all dofs active
@@ -51,7 +51,7 @@ module fib_param
     real(fk), parameter         :: rhoA = rhof*4.9807D-04, rhoI_yy = rhof*1.9175D-08, rhoI_zz = rhoI_yy
     ! gravity (buoyancy term active when inertia=1)
     integer, parameter          :: inertia = 1
-    real(fk), parameter         :: g_vec(3) = (/ 0.0, 0.0, 0.0 /)   ! natural-frequency test (production: 0,-9.81,0)
+    real(fk), parameter         :: g_vec(3) = (/ 0.0, -9.81, 0.0 /)
     ! Newmark parameters
     real, parameter             :: Nbeta = 0.25, Ngamma = 0.5
     ! Newton-Raphson: tolerance, max iterations and step of the finite-difference stiffness
@@ -59,16 +59,16 @@ module fib_param
     integer, parameter          :: nr_max = 50
     real(fk), parameter         :: Deltaf = merge(1.0D-09, 1.0D-07, precision(1._fk) > 20)
     ! output frequency of the fiber log (time steps)
-    integer, parameter          :: fib_log = 1                 ! natural-frequency test (production: 100)
+    integer, parameter          :: fib_log = 10
     ! output frequency of the fiber shape files output/fib_XXXXXXXX.dat (time steps, 0 = only at dump)
-    integer, parameter          :: fib_out = 10                ! mode-3 test: ~20 frames per period
+    integer, parameter          :: fib_out = 100
     ! .false.: fluid-fiber coupling off (no interpolation/spreading, zero hydrodynamic load):
     !          the fiber evolves in vacuum, to validate the structural solver alone.
     !          For a test without external load also set g_vec = 0 (or inertia = 0).
-    logical, parameter          :: fib_coupling = .false.      ! natural-frequency test (production: .true.)
+    logical, parameter          :: fib_coupling = .true.
     ! initial transverse velocity with the shape of a free-free bending mode (pert_mode = 1..4)
     ! (amplitude at the fiber ends, along pert_dir projected normal to the fiber); 0 = fiber at rest
-    double precision, parameter :: pert_amp = 1.d-3           ! natural-frequency test (production: 0)
+    double precision, parameter :: pert_amp = 0.d0
     double precision, parameter :: pert_dir(3) = (/ 0.d0, 1.d0, 0.d0 /)
-    integer, parameter          :: pert_mode = 3               ! mode-3 test
+    integer, parameter          :: pert_mode = 1
 end module fib_param

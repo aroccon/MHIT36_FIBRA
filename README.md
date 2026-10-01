@@ -24,6 +24,12 @@ Current capabiltiies:
 * Tracking of a stiff fiber using the method of Agrawal et al. 2024, DOI: https://doi.org/10.1016/j.cma.2023.116495
 * Extenension to many fibers (planned, TBD)
 
+Validation (see also below):
+* DNS solver ✅
+* Structural solver - free-free osc. frequencies ✅ (no flow coupling)
+* Free falling fibre  (no flow coupling) ✅
+* Free falling fibre  (flow coupling) ✅
+
 #### Systems supported:
 * Unix + nvfortran 
 
@@ -34,10 +40,10 @@ Current capabiltiies:
 * The code is serial and exploit a single GPU (GPU-resident)
 
 #### Output files.
-* Files containing the Eulerian fields (u\_\*\*\*, v\_\*\*\*\*, w\_\*\*\*\*, p\_\*\*\*\* and phi\_\*\*\*\*) and the fibre positions and orientations (fib\_\*\*\*) are stored in src/output
+* Files containing the Eulerian fields (u\_\*\*\*, v\_\*\*\*\*, w\_\*\*\*\*, p\_\*\*\*\* and the fibre positions and orientations (fib\_\*\*\*) are stored in src/output
 
 
-### Structural solver validation (Free-free bending frequencies vs Euler–Bernoulli theory)
+#### Structural solver validation (Free-free bending frequencies vs Euler–Bernoulli theory)
 
 | Case | Mode | `align_frame` | `pert_dir` | `nel` | Stiffness | Freq. analytical | Fr. MHIT36 | Error | FluTAS (reference) | 
 |---|---|---|---|---|---|---|---|---|---|
@@ -55,3 +61,7 @@ Current capabiltiies:
 ![Mode 1, nel = 12](val/mode1.gif)
 
 ![Mode 3, nel = 48](val/mode3.gif)
+
+#### Coupled solver validation (Free faaling and rotating fiber)
+
+![Mode 3, nel = 48](val/compare_flutas.png)

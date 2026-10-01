@@ -21,7 +21,8 @@ ap.add_argument('--scale', type=float, default=None)
 ap.add_argument('--fps', type=int, default=25)
 ap.add_argument('--out', default='fiber.mp4')
 ap.add_argument('--dir', default='output')
-args = ap.parse_args()
+# parse_known_args: ignore the extra arguments added by Jupyter (VS Code interactive window)
+args, _ = ap.parse_known_args()
 
 files = sorted(glob.glob(os.path.join(args.dir, 'fib_[0-9]*.dat')))
 if len(files) < 2:
