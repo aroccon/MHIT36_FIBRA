@@ -37,14 +37,10 @@ Current capabiltiies:
 * Files containing the Eulerian fields (u\_\*\*\*, v\_\*\*\*\*, w\_\*\*\*\*, p\_\*\*\*\* and phi\_\*\*\*\*) and the fibre positions and orientations (fib\_\*\*\*) are stored in src/output
 
 
-### Structural solver validation
-* Free-free bending frequencies vs Euler–Bernoulli theory
-
-Analytical: ω_n = (β_n L)² √(EI / (ρ_f A L⁴)), β_n L = 4.7300, 7.8532, 10.9956 (modes 1–3).
-With `align_frame = .false.` (FluTAS frame) bending in the y–z plane uses G·J instead of E·I.
+### Structural solver validation (Free-free bending frequencies vs Euler–Bernoulli theory)
 
 | Case | Mode | `align_frame` | `pert_dir` | `nel` | Stiffness | Freq. analytical | Fr. MHIT36 | Error | FluTAS (reference) | 
-|---|---|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|---|---|
 | 1  | 1 | `.true.`  | (0,1,0) | 12 | E·I | 20.646  |  20.359  | -1.39%    | 20.189  | 
 | 2  | 1 | `.true.`  | (0,1,0) | 24 | E·I | 20.646  |  20.568  | -0.38%    | 20.565  | 
 | 3  | 1 | `.true.`  | (0,1,0) | 48 | E·I | 20.646  |  20.635  | -0.05%    | 20.636  | 
