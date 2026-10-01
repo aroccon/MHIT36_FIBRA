@@ -23,14 +23,14 @@ module fib_param
     real, parameter             :: rhof = 10.             ! fiber density (only used when Eflag=.false.)
     character(1), parameter     :: c_type = "c"           ! cross section: c=circular, s=square
     ! initial position of the fiber centre and direction of its axis
-    double precision, parameter :: xc0 = 3.14d0          ! FluTAS: lx/2 with lx=6.28 (param_fibm)
-    double precision, parameter :: yc0 = 5.966d0         ! FluTAS: 0.95*ly
-    double precision, parameter :: zc0 = 3.14d0          ! FluTAS: lz/2
-    double precision, parameter :: dir0(3) = (/ 0.d0, 0.d0, 1.d0 /)   ! FluTAS: along z
+    double precision, parameter :: xc0 = 3.14159265358979d0
+    double precision, parameter :: yc0 = 3.14159265358979d0
+    double precision, parameter :: zc0 = 3.14159265358979d0
+    double precision, parameter :: dir0(3) = (/ 0.d0, 0.d0, 1.d0 /)
     ! .false.: material frame = global frame at t=0, as in FluTAS (the rod axis is then
     !          the material z axis, so axial/bending/torsion get the FluTAS stiffnesses)
     ! .true. : material axis 1 aligned with the fiber tangent at t=0
-    logical, parameter          :: align_frame = .false.       ! sedimentation vs FluTAS (production: .true.)
+    logical, parameter          :: align_frame = .true.
     ! IGA discretisation
     integer, parameter          :: nel = 12, deg_ele = 0  ! elements, degree elevation
     integer, parameter          :: p1_fordr = 2 + deg_ele ! control points per element
@@ -50,8 +50,8 @@ module fib_param
                                    EI_yy = 0.001, EI_zz = EI_yy, GJxx = 7.6921D-04
     real(fk), parameter         :: rhoA = rhof*4.9807D-04, rhoI_yy = rhof*1.9175D-08, rhoI_zz = rhoI_yy
     ! gravity (buoyancy term active when inertia=1)
-    integer, parameter          :: inertia = 1
-    real(fk), parameter         :: g_vec(3) = (/ 0.0, -9.81, 0.0 /)
+    integer, parameter          :: inertia = 0                     ! 1: gravity and buoyancy on the fiber
+    real(fk), parameter         :: g_vec(3) = (/ 0.0, 0.0, 0.0 /)
     ! Newmark parameters
     real, parameter             :: Nbeta = 0.25, Ngamma = 0.5
     ! Newton-Raphson: tolerance, max iterations and step of the finite-difference stiffness
@@ -59,7 +59,7 @@ module fib_param
     integer, parameter          :: nr_max = 50
     real(fk), parameter         :: Deltaf = merge(1.0D-09, 1.0D-07, precision(1._fk) > 20)
     ! output frequency of the fiber log (time steps)
-    integer, parameter          :: fib_log = 10
+    integer, parameter          :: fib_log = 100
     ! output frequency of the fiber shape files output/fib_XXXXXXXX.dat (time steps, 0 = only at dump)
     integer, parameter          :: fib_out = 100
     ! .false.: fluid-fiber coupling off (no interpolation/spreading, zero hydrodynamic load):

@@ -10,6 +10,8 @@
 
 #### GPU-based Finite difference code for DNS of Multiphase Homogenous isotropic turbulence with a single fibre
 
+![](val/fiber3d.gif)
+
 Developers:
 * A. Roccon (MHIT36 + porting of fiber tracking from FluTAS to MHIT36)
 * V. Agrawal (Original implementation of Fiber tracking in FluTAS)
@@ -29,6 +31,7 @@ Validation (see also below):
 * Structural solver - free-free osc. frequencies ✅ (no flow coupling)
 * Free falling fibre  (no flow coupling) ✅
 * Free falling fibre  (flow coupling) ✅
+* Jeffery's orbits (🚧)
 
 #### Systems supported:
 * Unix + nvfortran 
@@ -65,3 +68,6 @@ Validation (see also below):
 #### Coupled solver validation (Free faaling and rotating fiber)
 
 ![Mode 3, nel = 48](val/compare_flutas.png)
+
+#### Single fibre in HIT 
+
