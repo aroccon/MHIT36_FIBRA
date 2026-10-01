@@ -552,7 +552,7 @@ real(fk) :: state_x(p1_fordr,7), state_w(p1_fordr,6), state_x_inc(p1_fordr,7)
 real(fk) :: uae(p1_fordr,6), state_delta(rows_w)
 real(fk) :: NdN_temp(ngps*p1_fordr,nderiv), NdNb_temp(ngpb*p1_fordr,nderiv)
 real(fk) :: Jp_s(ngps), Jp_b(ngpb)
-real(fk) :: q_old(4), rel_q(4), q_current(4), Drot_vec(3), eN
+real(fk) :: q_old(4), rel_q(4), q_current(4), Drot_vec(3), eN, eN0, eN_hist(nr_max)
 real(8)  :: strain_gp0(ngps,3)
 real     :: elU(2)
 integer  :: cone(p1_fordr), ie_con(rows_w), iroco(3)
@@ -583,8 +583,9 @@ omgd3 = -omgo3*c_vd - omgdo3*c_ad
 
 nr_step = 0
 eN      = 1.0_fk
+eN0     = 0.0_fk
 DispX   = 0.0_fk
-do while (eN .gt. TOL)
+do while (eN .gt. TOL .and. eN .gt. TOL_rel*eN0)
     nr_step = nr_step + 1
     KG = 0.0_fk
     FG = 0.0_fk
@@ -701,14 +702,20 @@ do while (eN .gt. TOL)
 
     ! residual (evaluated before the update, as in FluTAS)
     eN = sqrt(sum(FG**2))
-    if (nr_step .ge. nr_max) then
-        write(*,*) "Fiber: Newton-Raphson not converged, residual", real(eN,8)
+    if (nr_step .eq. 1) eN0 = eN
+    eN_hist(nr_step) = eN
+    if (nr_step .ge. nr_max .and. eN .gt. TOL .and. eN .gt. TOL_rel*eN0) then
+        write(*,*) "Fiber: Newton-Raphson not converged at step", istep
+        write(*,*) "Fiber: residual per iteration (TOL, TOL_rel*first):", real(TOL,8), real(TOL_rel*eN0,8)
+        do n = 1, nr_step
+            write(*,'(a,i3,es14.5)') "   ", n, real(eN_hist(n),8)
+        enddo
         stop
     endif
 enddo
 nr_last = nr_step
 if (fib_out .gt. 0) then
-    if (mod(istep,fib_out) .eq. 0) call fib_write_shape(istep)
+    if (mod(istep,max(fib_out,1)) .eq. 0) call fib_write_shape(istep)
 endif
 
 ! store the new state

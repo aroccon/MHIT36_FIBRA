@@ -55,7 +55,10 @@ module fib_param
     ! Newmark parameters
     real, parameter             :: Nbeta = 0.25, Ngamma = 0.5
     ! Newton-Raphson: tolerance, max iterations and step of the finite-difference stiffness
+    ! converged when residual < TOL (absolute, as in FluTAS) or < TOL_rel * residual of the
+    ! first iteration (relative: scales with the stiffness and the time step; 0 = off)
     real(fk), parameter         :: TOL = 1.0D-07
+    real(fk), parameter         :: TOL_rel = 1.0D-08
     integer, parameter          :: nr_max = 50
     real(fk), parameter         :: Deltaf = merge(1.0D-09, 1.0D-07, precision(1._fk) > 20)
     ! output frequency of the fiber log (time steps)

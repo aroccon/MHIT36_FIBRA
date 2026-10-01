@@ -10,6 +10,8 @@
 
 #### GPU-based Finite difference code for DNS of Multiphase Homogenous isotropic turbulence with a single fibre
 
+Single fibre in HIT (Re_lam=95)
+
 ![](val/fiber3d.gif)
 
 Developers:
@@ -69,5 +71,4 @@ Validation (see also below):
 
 ![Mode 3, nel = 48](val/compare_flutas.png)
 
-#### Single fibre in HIT 
 
